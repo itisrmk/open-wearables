@@ -15,13 +15,30 @@ from app.schemas.model_crud.activities import (
     SleepStage,
     TimeSeriesSampleCreate,
 )
-from app.schemas.providers.polar import CardioLoadJSON, ContinuousHeartRateJSON, DailyActivityJSON, SleepJSON
+from app.schemas.providers.polar import CardioLoadJSON, ContinuousHeartRateJSON, DailyActivityJSON, NightlyRechargeJSON, SleepJSON
 from app.services.providers.api_client import make_authenticated_request
 from app.services.providers.templates.base_247_data import Base247DataTemplate
 from app.services.providers.templates.base_oauth import BaseOAuthTemplate
 
 
 class Polar247Data(Base247DataTemplate):
+    _NIGHTLY_RECHARGE_STATUS_LABELS: dict[int, str] = {
+        1: "very poor",
+        2: "poor",
+        3: "compromised",
+        4: "ok",
+        5: "good",
+        6: "very good",
+    }
+
+    _ANS_CHARGE_STATUS_LABELS: dict[int, str] = {
+        1: "much below usual",
+        2: "below usual",
+        3: "usual",
+        4: "above usual",
+        5: "much above usual",
+    }
+
     _HYPNOGRAM_STAGE_MAP: dict[int, SleepStageType] = {
         0: SleepStageType.AWAKE,
         1: SleepStageType.REM,
@@ -416,6 +433,65 @@ class Polar247Data(Base247DataTemplate):
             provider=ProviderName.POLAR,
             category=HealthScoreCategory.STRAIN,
             value=parsed.cardio_load,
+            recorded_at=datetime.fromisoformat(parsed.date),
+            components=components or None,
+        )
+
+    # -------------------------------------------------------------------------
+    # Nightly Recharge - GET /v3/users/nightly-recharge/{date}
+    # -------------------------------------------------------------------------
+
+    def get_nightly_recharge_data(
+        self,
+        db: DbSession,
+        user_id: UUID,
+        start_time: datetime,
+        end_time: datetime,
+    ) -> list[dict[str, Any]]:
+        date_range = {
+            start_time.date() + timedelta(days=i)
+            for i in range((end_time.date() - start_time.date()).days + 1)
+        }
+        results = []
+        for d in date_range:
+            response = self._make_api_request(db, user_id, f"/v3/users/nightly-recharge/{d.isoformat()}")
+            if response:
+                results.append(response)
+        return results
+
+    def normalize_nightly_recharge(
+        self,
+        raw: dict[str, Any],
+        user_id: UUID,
+    ) -> HealthScoreCreate | None:
+        parsed = NightlyRechargeJSON.model_validate(raw)
+        if parsed.nightly_recharge_status is None or not parsed.date:
+            return None
+
+        components: dict[str, ScoreComponent] = {}
+        for key, val in {
+            "heart_rate_avg": parsed.heart_rate_avg,
+            "beat_to_beat_avg": parsed.beat_to_beat_avg,
+            "heart_rate_variability_avg": parsed.heart_rate_variability_avg,
+            "breathing_rate_avg": parsed.breathing_rate_avg,
+            "ans_charge": parsed.ans_charge,
+        }.items():
+            if val is not None:
+                components[key] = ScoreComponent(value=val)
+
+        if parsed.ans_charge_status is not None:
+            components["ans_charge_status"] = ScoreComponent(
+                value=parsed.ans_charge_status,
+                qualifier=self._ANS_CHARGE_STATUS_LABELS.get(parsed.ans_charge_status),
+            )
+
+        return HealthScoreCreate(
+            id=uuid4(),
+            user_id=user_id,
+            provider=ProviderName.POLAR,
+            category=HealthScoreCategory.RECOVERY,
+            value=parsed.nightly_recharge_status,
+            qualifier=self._NIGHTLY_RECHARGE_STATUS_LABELS.get(parsed.nightly_recharge_status),
             recorded_at=datetime.fromisoformat(parsed.date),
             components=components or None,
         )

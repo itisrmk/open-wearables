@@ -10,8 +10,11 @@ from .daily_activity import (
 )
 from .exercise_import import (
     ExerciseJSON,
+    HeartRateJSON,
     HRSamplesJSON,
     HRZoneJSON,
+    RoutePointJSON,
+    TrainingLoadProJSON,
 )
 from .nightly_recharge import NightlyRechargeJSON, NightlyRechargeResponseJSON
 from .sleep import SleepJSON, SleepResponseJSON
@@ -31,8 +34,11 @@ __all__ = [
     "DailyActivitySamplesJSON",
     "DailyActivityJSON",
     # Exercise import
+    "HeartRateJSON",
     "HRSamplesJSON",
     "HRZoneJSON",
+    "RoutePointJSON",
+    "TrainingLoadProJSON",
     "ExerciseJSON",
     # Nightly recharge
     "NightlyRechargeJSON",

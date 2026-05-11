@@ -31,6 +31,7 @@ HEALTH_SCORE_RANGES: dict[HealthScoreCategory, dict[ProviderName, ScoreRange]] =
     HealthScoreCategory.RECOVERY: {
         ProviderName.WHOOP: ScoreRange(0, 100),
         ProviderName.SUUNTO: ScoreRange(0, 100),
+        ProviderName.POLAR: ScoreRange(1, 6),
     },
     HealthScoreCategory.STRAIN: {
         ProviderName.WHOOP: ScoreRange(0, 21),
