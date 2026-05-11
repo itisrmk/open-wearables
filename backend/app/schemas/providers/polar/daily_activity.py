@@ -38,5 +38,5 @@ class DailyActivityJSON(BaseModel):
     active_calories: int | None = None
     steps: int | None = None
     inactivity_alert_count: int | None = None
-    distance_from_steps: float | None = None
+    distance_from_steps: float | None = None # meters
     samples: DailyActivitySamplesJSON | None = None
