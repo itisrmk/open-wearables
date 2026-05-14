@@ -41,6 +41,7 @@ from app.schemas.providers.polar.sleepwise.circadian_bedtime import CircadianBed
 from app.services.event_record_service import event_record_service
 from app.services.health_score_service import health_score_service
 from app.services.providers.api_client import make_authenticated_request
+from app.services.raw_payload_storage import store_raw_payload
 from app.services.providers.templates.base_247_data import Base247DataTemplate
 from app.services.providers.templates.base_oauth import BaseOAuthTemplate
 from app.services.timeseries_service import timeseries_service
@@ -125,7 +126,7 @@ class Polar247Data(Base247DataTemplate):
         headers: dict[str, str] | None = None,
     ) -> Any:
         try:
-            return make_authenticated_request(
+            result = make_authenticated_request(
                 db=db,
                 user_id=user_id,
                 connection_repo=self.connection_repo,
@@ -137,6 +138,14 @@ class Polar247Data(Base247DataTemplate):
                 params=params,
                 headers=headers,
             )
+            store_raw_payload(
+                source="api_response",
+                provider="polar",
+                payload=result,
+                user_id=str(user_id),
+                trace_id=endpoint,
+            )
+            return result
         except HTTPException as e:
             # 404 = no data for this date / feature not available on this device
             if e.status_code == 404:
