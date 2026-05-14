@@ -369,8 +369,7 @@ class Polar247Data(Base247DataTemplate):
                 "inactivity_stamps": "false",
             }
             response = self._make_api_request(db, user_id, "/v3/users/activities", params=params)
-            if isinstance(response, list):
-                results.extend(response)
+            results.extend(response or [])
             chunk_start = chunk_end + timedelta(days=1)
         return results
 
@@ -421,8 +420,7 @@ class Polar247Data(Base247DataTemplate):
             chunk_end = min(chunk_start + timedelta(days=27), end_time)
             params = {"from": chunk_start.date().isoformat(), "to": chunk_end.date().isoformat()}
             response = self._make_api_request(db, user_id, "/v3/users/continuous-heart-rate", params=params)
-            if isinstance(response, list):
-                results.extend(response)
+            results.extend((response or {}).get("heart_rates", []))
             chunk_start = chunk_end + timedelta(days=1)
         return results
 
@@ -465,8 +463,7 @@ class Polar247Data(Base247DataTemplate):
             chunk_end = min(chunk_start + timedelta(days=27), end_time)
             params = {"from": chunk_start.date().isoformat(), "to": chunk_end.date().isoformat()}
             response = self._make_api_request(db, user_id, "/v3/users/cardio-load/date", params=params)
-            if isinstance(response, list):
-                results.extend(response)
+            results.extend(response or [])
             chunk_start = chunk_end + timedelta(days=1)
         return results
 
@@ -517,7 +514,7 @@ class Polar247Data(Base247DataTemplate):
         end_time: datetime,
     ) -> list[dict[str, Any]]:
         response = self._make_api_request(db, user_id, "/v3/users/nightly-recharge")
-        return response.get("recharges", []) if isinstance(response, dict) else []
+        return (response or {}).get("recharges", [])
 
     def normalize_nightly_recharge(
         self,
@@ -569,7 +566,7 @@ class Polar247Data(Base247DataTemplate):
             "to": end_time.date().isoformat(),
         }
         response = self._make_api_request(db, user_id, "/v3/users/sleepwise/alertness", params=params)
-        return response if isinstance(response, list) else []
+        return response or []
 
     def normalize_alertness(
         self,
@@ -620,7 +617,7 @@ class Polar247Data(Base247DataTemplate):
             "to": end_time.date().isoformat(),
         }
         response = self._make_api_request(db, user_id, "/v3/users/sleepwise/circadian-bedtime", params=params)
-        return response if isinstance(response, list) else []
+        return response or []
 
     def normalize_circadian_bedtime(
         self,
@@ -664,7 +661,7 @@ class Polar247Data(Base247DataTemplate):
     ) -> list[dict[str, Any]]:
         params = {"from": start_time.date().isoformat(), "to": end_time.date().isoformat()}
         response = self._make_api_request(db, user_id, "/v3/users/body-temperature", params=params)
-        return response if isinstance(response, list) else []
+        return response or []
 
     def normalize_body_temperature(
         self,
@@ -705,7 +702,7 @@ class Polar247Data(Base247DataTemplate):
     ) -> list[dict[str, Any]]:
         params = {"from": start_time.date().isoformat(), "to": end_time.date().isoformat()}
         response = self._make_api_request(db, user_id, "/v3/users/sleep-skin-temperature", params=params)
-        return response if isinstance(response, list) else []
+        return response or []
 
     def normalize_sleep_skin_temperature(
         self,
@@ -746,7 +743,7 @@ class Polar247Data(Base247DataTemplate):
     ) -> list[dict[str, Any]]:
         params = {"from": start_time.date().isoformat(), "to": end_time.date().isoformat()}
         response = self._make_api_request(db, user_id, "/v3/users/spo2", params=params)
-        return response if isinstance(response, list) else []
+        return response or []
 
     def normalize_spo2(
         self,
@@ -787,7 +784,7 @@ class Polar247Data(Base247DataTemplate):
     ) -> list[dict[str, Any]]:
         params = {"from": start_time.date().isoformat(), "to": end_time.date().isoformat()}
         response = self._make_api_request(db, user_id, "/v3/users/wrist-ecg", params=params)
-        return response if isinstance(response, list) else []
+        return response or []
 
     def normalize_wrist_ecg(
         self,
