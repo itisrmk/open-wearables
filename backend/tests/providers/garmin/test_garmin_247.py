@@ -708,8 +708,8 @@ class TestGarmin247Data:
         assert normalized["is_nap"] is False
         assert len(normalized["naps"]) == 1
 
-    def test_normalize_nap(self, garmin_247: Garmin247Data) -> None:
-        """_normalize_nap produces a normalized dict with is_nap=True."""
+    def test_build_nap_record(self, garmin_247: Garmin247Data) -> None:
+        """_build_nap_record returns a record+detail with is_nap=True and correct fields."""
         user_id = uuid4()
         nap = {
             "napDurationInSeconds": 600,
@@ -717,28 +717,20 @@ class TestGarmin247Data:
             "napValidation": "DEVICE",
             "napOffsetInSeconds": -18000,
         }
-        normalized = garmin_247._normalize_nap(nap, user_id, parent_summary_id="sleep_123")
-        assert normalized["is_nap"] is True
-        assert normalized["duration_seconds"] == 600
-        assert normalized["garmin_summary_id"] == "sleep_123"
-        assert normalized["validation"] == "DEVICE"
-        assert normalized["stages"] == {}
-        assert normalized["stage_timestamps"] is None
-
-    def test_build_sleep_record_nap(self, garmin_247: Garmin247Data) -> None:
-        """_build_sleep_record respects is_nap from normalized dict."""
-        user_id = uuid4()
-        nap = {
-            "napDurationInSeconds": 600,
-            "napStartTimeInSeconds": 1690916700,
-            "napValidation": "DEVICE",
-            "napOffsetInSeconds": -18000,
-        }
-        nap_normalized = garmin_247._normalize_nap(nap, user_id, parent_summary_id="sleep_123")
-        result = garmin_247._build_sleep_record(user_id, nap_normalized)
+        result = garmin_247._build_nap_record(nap, user_id, parent_summary_id="sleep_123")
         assert result is not None
-        _, detail = result
+        record, detail = result
+        assert record.external_id == "sleep_123"
+        assert record.duration_seconds == 600
         assert detail.is_nap is True
+        assert detail.sleep_total_duration_minutes == 10  # 600 // 60
+
+    def test_build_nap_record_missing_fields_returns_none(self, garmin_247: Garmin247Data) -> None:
+        """_build_nap_record returns None when start time or duration is missing."""
+        user_id = uuid4()
+        assert garmin_247._build_nap_record({}, user_id) is None
+        assert garmin_247._build_nap_record({"napDurationInSeconds": 600}, user_id) is None
+        assert garmin_247._build_nap_record({"napStartTimeInSeconds": 1690916700}, user_id) is None
 
     @patch("app.services.event_record_service.event_record_service.bulk_create")
     @patch("app.services.event_record_service.event_record_service.bulk_create_details")
