@@ -922,6 +922,49 @@ class Whoop247Data(Base247DataTemplate):
             )
             return 0
 
+    def get_cycles(
+        self,
+        db: DbSession,
+        user_id: UUID,
+        start_time: datetime,
+        end_time: datetime,
+    ) -> list[dict[str, Any]]:
+        """Fetch physiological cycles from /v2/cycle with pagination.
+
+        Used to backfill recovery per-cycle when the /v2/recovery list omits a
+        cycle (observed gaps in the list, including the most recent day).
+        """
+        all_cycles: list[dict[str, Any]] = []
+        next_token = None
+        max_limit = 25  # Whoop API limit
+
+        start_iso = start_time.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        end_iso = end_time.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+        while True:
+            params: dict[str, Any] = {"start": start_iso, "end": end_iso, "limit": max_limit}
+            if next_token:
+                params["nextToken"] = next_token
+            try:
+                response = self._make_api_request(db, user_id, "/v2/cycle", params=params)
+                records = response.get("records", []) if isinstance(response, dict) else []
+                all_cycles.extend(records)
+                next_token = response.get("next_token") if isinstance(response, dict) else None
+                if not records or not next_token:
+                    break
+            except Exception as e:
+                log_structured(
+                    self.logger,
+                    "error",
+                    f"Error fetching Whoop cycles: {e}",
+                    provider="whoop",
+                    task="get_cycles",
+                    user_id=str(user_id),
+                )
+                break
+
+        return all_cycles
+
     def load_and_save_recovery(
         self,
         db: DbSession,
@@ -936,6 +979,7 @@ class Whoop247Data(Base247DataTemplate):
         raw_data = self.get_recovery_data(db, user_id, start_time, end_time)
         total_count = 0
         health_scores: list[HealthScoreCreate] = []
+        saved_cycles: set[str] = set()
 
         for item in raw_data:
             try:
@@ -944,12 +988,45 @@ class Whoop247Data(Base247DataTemplate):
                     total_count += self.save_recovery_data(db, user_id, normalized)
                     if health_score:
                         health_scores.append(health_score)
+                    cid = item.get("cycle_id")
+                    if cid is not None:
+                        saved_cycles.add(str(cid))
             except Exception as e:
                 db.rollback()
                 log_structured(
                     self.logger,
                     "warning",
                     f"Failed to save recovery data: {e}",
+                    provider="whoop",
+                    task="load_and_save_recovery",
+                    user_id=str(user_id),
+                )
+
+        # Backfill via cycles: the /v2/recovery list misses cycles (observed gaps,
+        # including the most recent day), so resolve each recent cycle's recovery
+        # directly via /v2/cycle/{cycle_id}/recovery — the reliable per-cycle endpoint
+        # the recovery.updated webhook uses. Self-heals missed/late webhooks and
+        # list-omitted (or previously-unscored) cycles on every poll.
+        for cycle in self.get_cycles(db, user_id, start_time, end_time):
+            cycle_id = cycle.get("id")
+            if cycle_id is None or str(cycle_id) in saved_cycles:
+                continue
+            saved_cycles.add(str(cycle_id))
+            try:
+                raw = self.get_recovery_record(db, user_id, str(cycle_id))
+                if not raw:
+                    continue
+                normalized, health_score = self.normalize_recovery(raw, user_id)
+                if normalized:
+                    total_count += self.save_recovery_data(db, user_id, normalized)
+                    if health_score:
+                        health_scores.append(health_score)
+            except Exception as e:
+                db.rollback()
+                log_structured(
+                    self.logger,
+                    "warning",
+                    f"Failed cycle-recovery backfill for cycle {cycle_id}: {e}",
                     provider="whoop",
                     task="load_and_save_recovery",
                     user_id=str(user_id),
