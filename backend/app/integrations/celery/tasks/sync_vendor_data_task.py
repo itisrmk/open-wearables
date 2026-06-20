@@ -284,7 +284,14 @@ def sync_vendor_data(
                             message=f"Fetching workouts from {provider_name}",
                         )
                         try:
-                            success = strategy.workouts.load_data(db, user_uuid, **params)
+                            # Run workouts on a THROWAWAY session: its per-record commits +
+                            # begin_nested savepoints can leave a session unrecoverably in a
+                            # "committed" state where even rollback() fails, poisoning the rest
+                            # of the sync (sleep / recovery / connection updates all then raise
+                            # "session is in committed state"). Isolating it keeps the main `db`
+                            # clean. Workouts commit their own rows inside db_wk.
+                            with SessionLocal() as db_wk:
+                                success = strategy.workouts.load_data(db_wk, user_uuid, **params)
                             provider_result.params["workouts"] = {"success": success, **params}
                         except Exception as e:
                             log_structured(
@@ -310,15 +317,6 @@ def sync_vendor_data(
 
                     # Sync 247 data (sleep, recovery, activity) and SAVE to database
                     if hasattr(strategy, "data_247") and strategy.data_247:
-                        # The workouts sync above commits per-record (event_record_service),
-                        # leaving this shared session in a committed-transaction state that
-                        # refuses further SQL — so BOTH the connection read below AND the
-                        # sleep/recovery writes inside data_247.load_data would raise
-                        # "session is in 'committed' state; no further SQL can be emitted".
-                        # Reset to a clean transaction (workouts rows are already committed,
-                        # so nothing is lost) and re-load the now-expired connection.
-                        db.rollback()
-                        connection = db.get(type(connection), connection.id)
                         # Determine if this is first sync (for API compatibility with providers)
                         is_first_sync = connection.last_synced_at is None
 
