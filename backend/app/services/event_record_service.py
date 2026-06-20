@@ -125,7 +125,12 @@ class EventRecordService(
     ) -> EventRecordDetail:
         result = self.event_record_detail_repo.create(db_session, detail, detail_type=detail_type)
         record = db_session.get(EventRecord, detail.record_id)
-        if record is not None and record.data_source_id is not None:
+        # Only register the after_commit webhook dispatch when outgoing webhooks are actually
+        # enabled. Otherwise it is pure overhead AND the per-create once=True listener (which
+        # removes itself DURING after_commit) corrupts the session's transaction into an
+        # unrollback-able "committed" state — aborting the entire data sync (sleep/recovery
+        # never save). svix_service.is_enabled() is False when no SVIX token is configured.
+        if record is not None and record.data_source_id is not None and svix_service.is_enabled():
             data_source = db_session.get(DataSource, record.data_source_id)
             if data_source is not None:
                 _record, _data_source, _detail = record, data_source, detail
@@ -612,7 +617,7 @@ class EventRecordService(
                 continue
             dispatches.append((record, data_source, detail))
 
-        if not dispatches:
+        if not dispatches or not svix_service.is_enabled():
             return
 
         @sa_event.listens_for(db_session, "after_commit", once=True)
