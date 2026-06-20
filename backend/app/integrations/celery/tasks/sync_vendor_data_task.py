@@ -112,6 +112,13 @@ def sync_vendor_data(
     )
 
     with SessionLocal() as db:
+        # Per-record commits inside the workouts/247 sync (event_record_service.create)
+        # would otherwise EXPIRE every loaded ORM object; the next read of an expired
+        # attribute (e.g. connection.last_synced_at / provider_user_id) then lazy-loads on
+        # the just-committed session and raises "session is in 'committed' state; no further
+        # SQL can be emitted" — aborting the whole sync (sleep + recovery never save). Keep
+        # attributes live across commits so the orchestration can read them after a commit.
+        db.expire_on_commit = False
         try:
             connections = user_connection_repo.get_all_active_by_user(db, user_uuid)
 
