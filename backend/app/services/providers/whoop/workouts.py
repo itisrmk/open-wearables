@@ -418,11 +418,24 @@ class WhoopWorkouts(BaseWorkoutsTemplate):
                     strain_scores.append(strain_score)
 
         if strain_scores:
+            # The per-record event_record_service.create() calls above each commit, so
+            # the session can be left in a committed-transaction state ("no further SQL
+            # can be emitted within this transaction"). Reset it so the strain-score
+            # bulk_create runs in a clean transaction. The workout records are already
+            # persisted per-record, so a strain-score failure must NOT fail the sync.
             try:
+                db.rollback()
                 health_score_service.bulk_create(db, strain_scores)
                 db.commit()
-            except Exception:
+            except Exception as e:
                 db.rollback()
-                raise
+                log_structured(
+                    self.logger,
+                    "warning",
+                    f"Failed to save workout strain scores (workouts already saved): {e}",
+                    provider="whoop",
+                    task="load_data",
+                    user_id=str(user_id),
+                )
 
         return count
