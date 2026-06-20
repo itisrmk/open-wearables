@@ -310,6 +310,15 @@ def sync_vendor_data(
 
                     # Sync 247 data (sleep, recovery, activity) and SAVE to database
                     if hasattr(strategy, "data_247") and strategy.data_247:
+                        # The workouts sync above commits per-record (event_record_service),
+                        # leaving this shared session in a committed-transaction state that
+                        # refuses further SQL — so BOTH the connection read below AND the
+                        # sleep/recovery writes inside data_247.load_data would raise
+                        # "session is in 'committed' state; no further SQL can be emitted".
+                        # Reset to a clean transaction (workouts rows are already committed,
+                        # so nothing is lost) and re-load the now-expired connection.
+                        db.rollback()
+                        connection = db.get(type(connection), connection.id)
                         # Determine if this is first sync (for API compatibility with providers)
                         is_first_sync = connection.last_synced_at is None
 
