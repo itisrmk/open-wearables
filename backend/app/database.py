@@ -39,7 +39,13 @@ async_engine = create_async_engine(settings.db_uri)
 
 
 def _prepare_sessionmaker(engine: Engine) -> sessionmaker:
-    return sessionmaker(autocommit=False, autoflush=False, bind=engine)
+    # expire_on_commit=False (matches the async sessionmaker below): the data-sync flow
+    # commits per-record (event_record_service) AND has an after_commit webhook listener.
+    # With the default expire_on_commit=True, every commit expires all loaded ORM objects,
+    # so the listener — and the orchestration's later reads of connection.* — lazy-load on
+    # the just-committed session and raise "session is in 'committed' state; no further SQL",
+    # aborting the WHOLE sync (sleep + recovery never save). Keeping attributes live fixes it.
+    return sessionmaker(autocommit=False, autoflush=False, bind=engine, expire_on_commit=False)
 
 
 def _prepare_async_sessionmaker(engine: AsyncEngine) -> async_sessionmaker:
