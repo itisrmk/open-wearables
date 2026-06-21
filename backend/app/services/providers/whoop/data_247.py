@@ -910,7 +910,11 @@ class Whoop247Data(Base247DataTemplate):
                 return 0
             count = self.save_recovery_data(db, user_id, normalized)
             if health_score:
-                health_score_service.create(db, health_score)
+                # upsert (not create): WHOOP re-scores recovery after a sleep finalizes and
+                # re-fires recovery.updated with the same recorded_at; do_nothing kept the
+                # stale first value (e.g. 72) instead of the refined one (97). Updates the
+                # HRV/RHR/SpO2 components too.
+                health_score_service.upsert(db, [health_score])
             return count
         except Exception as e:
             log_structured(
@@ -1033,7 +1037,9 @@ class Whoop247Data(Base247DataTemplate):
                 )
 
         if health_scores:
-            health_score_service.bulk_create(db, health_scores)
+            # upsert: the poll re-fetches recent recovery, which WHOOP may have refined since
+            # the first compute — overwrite the stale value/components rather than skip it.
+            health_score_service.upsert(db, health_scores)
             db.commit()
 
         return total_count
