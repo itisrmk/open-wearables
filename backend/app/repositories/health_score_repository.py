@@ -58,6 +58,33 @@ class HealthScoreRepository(CrudRepository[HealthScore, HealthScoreCreate, Healt
         db_session.execute(stmt)
         # Caller is responsible for commit — allows batching with other operations
 
+    def upsert(self, db_session: DbSession, creators: list[HealthScoreCreate]) -> None:
+        """Insert health scores, UPDATING value/components/qualifier on conflict with the
+        (user_id, provider, category, recorded_at) unique constraint — so a re-scored value
+        OVERWRITES the earlier one instead of being dropped by on_conflict_do_nothing.
+
+        Needed for WHOOP recovery, which refines after a sleep finalizes (e.g. 72 -> 97 with
+        new HRV/RHR/SpO2 components) and re-fires recovery.updated with the SAME recorded_at;
+        do_nothing kept the stale first value forever.
+
+        Targets only the (...,category,recorded_at) constraint, so use ONLY for scores with
+        sleep_record_id NULL (recovery/readiness/body_battery). Sleep uses bulk_create + the
+        delete-and-recompute path and would otherwise risk the partial sleep_record index.
+        """
+        if not creators:
+            return
+        values = [c.model_dump() for c in creators]
+        stmt = insert(HealthScore).values(values)
+        stmt = stmt.on_conflict_do_update(
+            constraint="uq_health_score_user_provider_category_time",
+            set_={
+                "value": stmt.excluded.value,
+                "components": stmt.excluded.components,
+                "qualifier": stmt.excluded.qualifier,
+            },
+        )
+        db_session.execute(stmt)
+
     def get_latest_by_category(
         self,
         db_session: DbSession,

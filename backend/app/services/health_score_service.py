@@ -30,6 +30,11 @@ class HealthScoreService(
     def bulk_create(self, db_session: DbSession, scores: list[HealthScoreCreate]) -> None:
         self.crud.bulk_create(db_session, scores)
 
+    def upsert(self, db_session: DbSession, scores: list[HealthScoreCreate]) -> None:
+        """Insert-or-update on conflict — for re-scored values (e.g. WHOOP recovery 72->97).
+        Recovery/readiness/body_battery only; see HealthScoreRepository.upsert."""
+        self.crud.upsert(db_session, scores)
+
     @handle_exceptions
     def get_latest_by_category(
         self,
