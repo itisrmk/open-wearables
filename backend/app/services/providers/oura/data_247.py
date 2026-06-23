@@ -857,6 +857,88 @@ class Oura247Data(Base247DataTemplate):
         return len(normalized)
 
     # -------------------------------------------------------------------------
+    # Daily Stress - /v2/usercollection/daily_stress
+    # -------------------------------------------------------------------------
+
+    def get_daily_stress_data(
+        self,
+        db: DbSession,
+        user_id: UUID,
+        start_time: datetime,
+        end_time: datetime,
+    ) -> list[dict[str, Any]]:
+        """Fetch daily stress from Oura API."""
+        params = {
+            "start_date": start_time.strftime("%Y-%m-%d"),
+            "end_date": end_time.strftime("%Y-%m-%dT23:59:59"),
+        }
+        return self._paginate(db, user_id, "/v2/usercollection/daily_stress", params)
+
+    def normalize_daily_stress_scores(
+        self,
+        raw_items: list[dict[str, Any]],
+        user_id: UUID,
+    ) -> list[HealthScoreCreate]:
+        """Normalize Oura daily stress to a 0-100 HealthScore (HIGHER = more stress).
+
+        Oura reports `stress_high` / `recovery_high` (seconds, mutually exclusive) plus a
+        `day_summary` (restored / normal / stressful). Score = fraction of monitored time in high
+        stress (stress_high / (stress_high + recovery_high) * 100); if those are absent, fall back
+        to the day_summary bucket. Motif's convention: higher = worse.
+        """
+        summary_map = {"restored": 20, "normal": 50, "stressful": 80}
+        result = []
+        for item in raw_items:
+            day = item.get("day")
+            stress_high = item.get("stress_high")
+            recovery_high = item.get("recovery_high")
+
+            value: float | None = None
+            denom = (stress_high or 0) + (recovery_high or 0)
+            if denom > 0:
+                value = round((stress_high or 0) / denom * 100)
+            else:
+                summary = (item.get("day_summary") or "").lower()
+                value = summary_map.get(summary)
+            if value is None:
+                continue
+
+            recorded_at = None
+            ts = item.get("timestamp")
+            if ts:
+                with suppress(ValueError, AttributeError):
+                    recorded_at = datetime.fromisoformat(str(ts).replace("Z", "+00:00"))
+            if recorded_at is None and day:
+                with suppress(ValueError, AttributeError):
+                    recorded_at = datetime.strptime(day, "%Y-%m-%d").replace(tzinfo=timezone.utc)
+            if recorded_at is None:
+                continue
+
+            result.append(
+                HealthScoreCreate(
+                    id=uuid4(),
+                    user_id=user_id,
+                    category=HealthScoreCategory.STRESS,
+                    value=value,
+                    provider=ProviderName.OURA,
+                    recorded_at=recorded_at,
+                )
+            )
+        return result
+
+    def save_daily_stress_scores(
+        self,
+        db: DbSession,
+        user_id: UUID,
+        normalized: list[HealthScoreCreate],
+    ) -> int:
+        """Save daily stress scores via health_score_service."""
+        if normalized:
+            health_score_service.bulk_create(db, normalized)
+            db.commit()
+        return len(normalized)
+
+    # -------------------------------------------------------------------------
     # Daily SpO2 Data
     # -------------------------------------------------------------------------
 
@@ -1221,6 +1303,13 @@ class Oura247Data(Base247DataTemplate):
                 user_id,
                 self.normalize_daily_sleep_scores(
                     self.get_daily_sleep_score_data(db, user_id, start_time, end_time), user_id
+                ),
+            ),
+            "stress": lambda: self.save_daily_stress_scores(
+                db,
+                user_id,
+                self.normalize_daily_stress_scores(
+                    self.get_daily_stress_data(db, user_id, start_time, end_time), user_id
                 ),
             ),
             "spo2": lambda: self.save_spo2_data(db, user_id, self.get_spo2_data(db, user_id, start_time, end_time)),
