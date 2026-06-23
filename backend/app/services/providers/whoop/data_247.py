@@ -751,9 +751,11 @@ class Whoop247Data(Base247DataTemplate):
     ) -> HealthScoreCreate | None:
         """Build a HealthScoreCreate for Whoop DAY STRAIN (0-21) from a /v2/cycle record.
 
-        Strain lives on the cycle (not recovery). recorded_at uses the cycle end, falling back to
-        the cycle start. Skip unscored cycles. Strain re-scores as the day progresses, so this is
-        upserted alongside recovery in load_and_save_recovery (same uq constraint, different category).
+        Strain lives on the cycle (not recovery). recorded_at uses the cycle START, which is the day
+        WHOOP attributes the strain to (the active waking day, same day its recovery is shown). The
+        cycle END is the NEXT morning's wake, so using it filed every day's strain one calendar day
+        late. Skip unscored cycles. Strain re-scores as the day progresses, so this is upserted
+        alongside recovery in load_and_save_recovery (same uq constraint, different category).
         """
         if cycle.get("score_state") != "SCORED":
             return None
@@ -761,7 +763,7 @@ class Whoop247Data(Base247DataTemplate):
         strain = score.get("strain")
         if strain is None:
             return None
-        ts_raw = cycle.get("end") or cycle.get("start")
+        ts_raw = cycle.get("start") or cycle.get("end")
         if not ts_raw:
             return None
         try:
