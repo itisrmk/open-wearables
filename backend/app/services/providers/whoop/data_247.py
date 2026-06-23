@@ -744,6 +744,45 @@ class Whoop247Data(Base247DataTemplate):
             components=components or None,
         )
 
+    def _normalize_strain_health_score(
+        self,
+        cycle: dict[str, Any],
+        user_id: UUID,
+    ) -> HealthScoreCreate | None:
+        """Build a HealthScoreCreate for Whoop DAY STRAIN (0-21) from a /v2/cycle record.
+
+        Strain lives on the cycle (not recovery). recorded_at uses the cycle end, falling back to
+        the cycle start. Skip unscored cycles. Strain re-scores as the day progresses, so this is
+        upserted alongside recovery in load_and_save_recovery (same uq constraint, different category).
+        """
+        if cycle.get("score_state") != "SCORED":
+            return None
+        score = cycle.get("score") or {}
+        strain = score.get("strain")
+        if strain is None:
+            return None
+        ts_raw = cycle.get("end") or cycle.get("start")
+        if not ts_raw:
+            return None
+        try:
+            timestamp = datetime.fromisoformat(str(ts_raw).replace("Z", "+00:00"))
+        except (ValueError, TypeError):
+            return None
+        components = {
+            k: ScoreComponent(value=score.get(k))
+            for k in ("kilojoule", "average_heart_rate", "max_heart_rate")
+            if score.get(k) is not None
+        }
+        return HealthScoreCreate(
+            id=uuid4(),
+            user_id=user_id,
+            provider=ProviderName.WHOOP,
+            category=HealthScoreCategory.STRAIN,
+            value=strain,
+            recorded_at=timestamp,
+            components=components or None,
+        )
+
     def normalize_recovery(
         self,
         raw_recovery: dict[str, Any],
@@ -1013,6 +1052,14 @@ class Whoop247Data(Base247DataTemplate):
         # list-omitted (or previously-unscored) cycles on every poll.
         for cycle in self.get_cycles(db, user_id, start_time, end_time):
             cycle_id = cycle.get("id")
+            # Day STRAIN lives on the cycle itself (every cycle, even those whose recovery was
+            # already saved above), so extract it BEFORE the recovery-dedup skip.
+            try:
+                strain_hs = self._normalize_strain_health_score(cycle, user_id)
+                if strain_hs:
+                    health_scores.append(strain_hs)
+            except Exception:
+                pass
             if cycle_id is None or str(cycle_id) in saved_cycles:
                 continue
             saved_cycles.add(str(cycle_id))
